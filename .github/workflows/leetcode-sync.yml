@@ -1,63 +1,38 @@
+name: Sync LeetCode
+
 on:
   schedule:
-    - cron: '0 0 * * *'  # daily at 00:00 UTC
-  workflow_dispatch: {}
-  repository_dispatch:
-    types: [leetcode-sync]
-
-permissions:
-  contents: write  # allow the workflow to push changes
+    - cron: '0 0 * * *'  # Runs daily at midnight UTC
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          persist-credentials: true
-
+        
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-
-      - name: Install dependencies (if you add requirements)
+          
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      - name: Run LeetCode sync script
+          pip install -r requirements.txt
+          
+      - name: Run sync script
         env:
           LEETCODE_SESSION: ${{ secrets.LEETCODE_SESSION }}
-          LEETCODE_USERNAME: ${{ secrets.LEETCODE_USERNAME }}
-          LEETCODE_PASSWORD: ${{ secrets.LEETCODE_PASSWORD }}
+          LEETCODE_CSRF_TOKEN: ${{ secrets.LEETCODE_CSRF_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/sync_leetcode.py
+        
+      - name: Commit and push changes
         run: |
-          python scripts/sync_leetcode.py
-
-      - name: Commit & push if changed
-        env:
-          GIT_USER_NAME: ${{ secrets.GIT_USER_NAME }}
-          GIT_USER_EMAIL: ${{ secrets.GIT_USER_EMAIL }}
-        run: |
-          git config user.name "${GIT_USER_NAME:-github-actions[bot]}"
-          git config user.email "${GIT_USER_EMAIL:-actions@github.com}"
-
-          # If nothing changed, exit successfully
-          if ! git status --porcelain | grep .; then
-            echo "No changes to commit"
-            exit 0
-          fi
-
-          git add -A
-          git commit -m "chore: sync LeetCode solutions (automated)"
-
-          # Push to the current branch name (avoid hard-coded 'main').
-          # Use the github.ref_name value if available; otherwise infer current branch.
-          BRANCH_NAME="${GITHUB_REF_NAME:-}"
-          if [ -z "$BRANCH_NAME" ]; then
-            # When GITHUB_REF_NAME isn't provided to the shell, infer via git
-            BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
-          fi
-          echo "Pushing to branch: $BRANCH_NAME"
-          git push origin HEAD:"$BRANCH_NAME"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add solutions/
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Sync LeetCode solutions - $(date +'%Y-%m-%d')" && git push)
