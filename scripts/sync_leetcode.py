@@ -4,16 +4,12 @@ Fetch accepted LeetCode submissions and save them to files.
 
 Auth:
 - Uses LEETCODE_SESSION cookie (required). Provide via GitHub Secret.
-- Script will GET the homepage to obtain csrftoken cookie and then use GraphQL.
+- CSRF token is automatically extracted from the session.
 
 Output:
 - Writes files to solutions/{language}/{question_id}-{title_slug}.{ext}
 - Adds a small header comment with metadata.
 - Skips writing files if content is unchanged.
-
-Notes:
-- If LEETCODE_SESSION is invalid/expired, the script will log errors. Refresh cookie and update secret.
-- Be considerate of rate limits; this script sleeps briefly between detailed fetches.
 """
 
 import json
@@ -45,7 +41,7 @@ LANG_INFO = {
     "swift": (".swift", "//"),
 }
 
-USER_AGENT = "github-action-leetcode-sync/1.0 (+https://github.com)"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 def sanitize(s: str) -> str:
     s = s.strip()
@@ -57,6 +53,38 @@ def sanitize(s: str) -> str:
 def get_file_ext_and_comment(lang: str):
     lang_lower = lang.lower()
     return LANG_INFO.get(lang_lower, (".txt", "#"))
+
+def get_csrf_token(session: requests.Session) -> Optional[str]:
+    """
+    Extract CSRF token from session cookies by making a simple GET request.
+    """
+    try:
+        # Try to get a page that sets CSRF token
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+        }
+        resp = session.get("https://leetcode.com/problemset/", headers=headers, timeout=30)
+        
+        # Extract CSRF token from cookies
+        csrf = session.cookies.get("csrftoken") or session.cookies.get("csrf")
+        if csrf:
+            print(f"Successfully obtained CSRF token")
+            return csrf
+        
+        print(f"Warning: Could not extract CSRF token. Status: {resp.status_code}")
+        return None
+    except Exception as e:
+        print(f"Error getting CSRF token: {e}")
+        return None
 
 def fetch_submissions(session: requests.Session, limit: int = 1000):
     results = []
@@ -87,7 +115,7 @@ def fetch_submissions(session: requests.Session, limit: int = 1000):
     print(f"Total submissions fetched: {len(results)}")
     return results
 
-def fetch_submission_code(session: requests.Session, submission_id: int) -> Optional[Dict]:
+def fetch_submission_code(session: requests.Session, submission_id: int, csrf_token: str) -> Optional[Dict]:
     graphql_url = "https://leetcode.com/graphql"
     query = """
     query submissionDetail($id: ID!) {
@@ -107,13 +135,18 @@ def fetch_submission_code(session: requests.Session, submission_id: int) -> Opti
     """
     variables = {"id": str(submission_id)}
     payload = {"query": query, "variables": variables}
-    headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
-    csrftoken = session.cookies.get("csrftoken") or session.cookies.get("CSRFToken")
-    if csrftoken:
-        headers["x-csrftoken"] = csrftoken
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
+        "x-csrftoken": csrf_token,
+        "Referer": "https://leetcode.com/",
+        "Origin": "https://leetcode.com",
+    }
+    
     resp = session.post(graphql_url, json=payload, headers=headers, timeout=30)
     if resp.status_code != 200:
         print(f"GraphQL fetch failed for submission {submission_id}: {resp.status_code}")
+        print(f"Response: {resp.text[:300]}")
         return None
     try:
         body = resp.json()
@@ -148,15 +181,13 @@ def main():
         sys.exit(0)
 
     s = requests.Session()
-    s.headers.update({"User-Agent": USER_AGENT, "Referer": "https://leetcode.com"})
-    s.cookies.set("LEETCODE_SESSION", LEETCODE_SESSION, domain="leetcode.com", path="/")
+    s.headers.update({"User-Agent": USER_AGENT})
+    s.cookies.set("LEETCODE_SESSION", LEETCODE_SESSION, domain=".leetcode.com", path="/")
 
-    try:
-        resp = s.get("https://leetcode.com", timeout=30)
-        if resp.status_code != 200:
-            print("Warning: GET https://leetcode.com returned", resp.status_code)
-    except Exception as e:
-        print("Failed to GET homepage:", e)
+    # Get CSRF token
+    csrf_token = get_csrf_token(s)
+    if not csrf_token:
+        print("Failed to obtain CSRF token. Please check your LEETCODE_SESSION cookie.")
         sys.exit(1)
 
     submissions = fetch_submissions(s, limit=1000)
@@ -178,7 +209,7 @@ def main():
         if not sub_id or not title_slug:
             continue
 
-        detail = fetch_submission_code(s, sub_id)
+        detail = fetch_submission_code(s, sub_id, csrf_token)
         if not detail:
             print(f"Skipping submission {sub_id} due to fetch failure.")
             continue
@@ -191,7 +222,6 @@ def main():
 
         ext, comment_mark = get_file_ext_and_comment(lang or (detail.get("lang") or ""))
         safe_slug = sanitize(question_slug)
-        safe_title = sanitize(question_title)
         lang_dir = sanitize(lang or detail.get("lang") or "unknown")
         target_dir = OUT_DIR / lang_dir
         target_dir.mkdir(parents=True, exist_ok=True)
