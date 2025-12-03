@@ -31,7 +31,6 @@ LEETCODE_SESSION = os.environ.get("LEETCODE_SESSION")
 OUT_DIR = Path("solutions")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Map LeetCode language names to file extensions and comment markers
 LANG_INFO = {
     "python": (".py", "#"),
     "python3": (".py", "#"),
@@ -48,7 +47,6 @@ LANG_INFO = {
 
 USER_AGENT = "github-action-leetcode-sync/1.0 (+https://github.com)"
 
-# sanitize a title_slug or title to a filesystem-safe slug
 def sanitize(s: str) -> str:
     s = s.strip()
     s = s.replace(" ", "-")
@@ -61,13 +59,9 @@ def get_file_ext_and_comment(lang: str):
     return LANG_INFO.get(lang_lower, (".txt", "#"))
 
 def fetch_submissions(session: requests.Session, limit: int = 1000):
-    """
-    Fetch submissions using LeetCode JSON API endpoint.
-    Returns list of submission dicts (most recent first).
-    """
     results = []
     offset = 0
-    page_limit = 50  # page size for the API; we'll loop until we have limit or no more
+    page_limit = 50
     while offset < limit:
         url = f"https://leetcode.com/api/submissions/?offset={offset}&limit={page_limit}"
         print(f"Fetching submissions offset={offset} limit={page_limit}")
@@ -84,11 +78,9 @@ def fetch_submissions(session: requests.Session, limit: int = 1000):
         if not batch:
             break
         results.extend(batch)
-        # if we got fewer than the page_limit, no more pages
         if len(batch) < page_limit:
             break
         offset += page_limit
-        # safety cap
         if offset >= limit:
             break
         time.sleep(0.5)
@@ -96,10 +88,6 @@ def fetch_submissions(session: requests.Session, limit: int = 1000):
     return results
 
 def fetch_submission_code(session: requests.Session, submission_id: int) -> Optional[Dict]:
-    """
-    Fetch submission detail via GraphQL.
-    Returns dict with code, lang, question metadata or None on failure.
-    """
     graphql_url = "https://leetcode.com/graphql"
     query = """
     query submissionDetail($id: ID!) {
@@ -120,7 +108,6 @@ def fetch_submission_code(session: requests.Session, submission_id: int) -> Opti
     variables = {"id": str(submission_id)}
     payload = {"query": query, "variables": variables}
     headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
-    # LeetCode requires X-CSRFToken header with the csrftoken cookie
     csrftoken = session.cookies.get("csrftoken") or session.cookies.get("CSRFToken")
     if csrftoken:
         headers["x-csrftoken"] = csrftoken
@@ -136,7 +123,6 @@ def fetch_submission_code(session: requests.Session, submission_id: int) -> Opti
     data = body.get("data", {})
     sub = data.get("submissionDetail")
     if not sub:
-        # Sometimes returned under other keys or errors
         print(f"No submissionDetail in GraphQL response for {submission_id}: {body}")
         return None
     return sub
@@ -163,11 +149,8 @@ def main():
 
     s = requests.Session()
     s.headers.update({"User-Agent": USER_AGENT, "Referer": "https://leetcode.com"})
-
-    # Add LEETCODE_SESSION cookie
     s.cookies.set("LEETCODE_SESSION", LEETCODE_SESSION, domain="leetcode.com", path="/")
 
-    # GET homepage to get csrftoken cookie
     try:
         resp = s.get("https://leetcode.com", timeout=30)
         if resp.status_code != 200:
@@ -181,12 +164,10 @@ def main():
         print("No submissions available or failed to fetch submissions.")
         sys.exit(0)
 
-    # Keep track if any file changes
     files_written = 0
     files_updated = 0
     files_skipped = 0
 
-    # Process accepted submissions
     for sub in submissions:
         status = sub.get("status_display") or sub.get("status")
         if status != "Accepted":
@@ -194,11 +175,9 @@ def main():
         sub_id = sub.get("id")
         title_slug = sub.get("title_slug") or sub.get("titleSlug")
         lang = sub.get("lang") or sub.get("language") or sub.get("language_display") or sub.get("status_lang", "unknown")
-        # Some entries lack proper info; safe guards:
         if not sub_id or not title_slug:
             continue
 
-        # We will fetch submission detail (code) via GraphQL
         detail = fetch_submission_code(s, sub_id)
         if not detail:
             print(f"Skipping submission {sub_id} due to fetch failure.")
@@ -213,7 +192,6 @@ def main():
         ext, comment_mark = get_file_ext_and_comment(lang or (detail.get("lang") or ""))
         safe_slug = sanitize(question_slug)
         safe_title = sanitize(question_title)
-        # Build directory: solutions/{language}/
         lang_dir = sanitize(lang or detail.get("lang") or "unknown")
         target_dir = OUT_DIR / lang_dir
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -230,14 +208,11 @@ def main():
         }
         header = make_header(comment_mark, header_meta)
 
-        # Compose final content
         if ext in [".py", ".rb", ".sh", ".txt", ".md", ".java", ".js", ".ts", ".go", ".c", ".cpp", ".cs"]:
             content = header + code.lstrip("\n")
         else:
-            # unknown extension - write with header + code
             content = header + code
 
-        # If file exists and identical, skip
         if target_path.exists():
             try:
                 existing = target_path.read_text(encoding="utf-8")
@@ -256,18 +231,10 @@ def main():
             target_path.write_text(content, encoding="utf-8")
             files_written += 1
 
-        # small pause to avoid too-rapid requests
         time.sleep(0.3)
 
     print(f"Done. Written: {files_written}, Updated: {files_updated}, Skipped: {files_skipped}")
-
-    # Exit 0 (workflow's commit step will detect changes and commit)
     sys.exit(0)
 
 if __name__ == "__main__":
     main()
-```
-
-## 3. `requirements.txt` (root directory)
-```
-requests
