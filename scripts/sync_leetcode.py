@@ -3,7 +3,7 @@
 Fetch accepted LeetCode submissions and save them to files.
 
 Auth:
-- Uses LEETCODE_SESSION cookie (preferred). Provide via GitHub Secret.
+- Uses LEETCODE_SESSION cookie (required). Provide via GitHub Secret.
 - Script will GET the homepage to obtain csrftoken cookie and then use GraphQL.
 
 Output:
@@ -27,8 +27,6 @@ from typing import Dict, Optional
 import requests
 
 LEETCODE_SESSION = os.environ.get("LEETCODE_SESSION")
-LEETCODE_USERNAME = os.environ.get("LEETCODE_USERNAME")
-LEETCODE_PASSWORD = os.environ.get("LEETCODE_PASSWORD")
 
 OUT_DIR = Path("solutions")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -159,20 +157,15 @@ def make_header(comment_mark: str, meta: Dict):
     return "\n".join(lines) + "\n\n"
 
 def main():
-    if not (LEETCODE_SESSION or (LEETCODE_USERNAME and LEETCODE_PASSWORD)):
-        print("No LEETCODE_SESSION or username/password provided. Exiting without changes.")
+    if not LEETCODE_SESSION:
+        print("No LEETCODE_SESSION provided. Exiting without changes.")
         sys.exit(0)
 
     s = requests.Session()
     s.headers.update({"User-Agent": USER_AGENT, "Referer": "https://leetcode.com"})
 
-    # add LEETCODE_SESSION cookie if provided
-    if LEETCODE_SESSION:
-        s.cookies.set("LEETCODE_SESSION", LEETCODE_SESSION, domain="leetcode.com", path="/")
-    else:
-        # Here you could implement login using LEETCODE_USERNAME/PASSWORD if desired
-        print("LEETCODE_SESSION not provided, and no username/password login implemented. Exiting.")
-        sys.exit(0)
+    # Add LEETCODE_SESSION cookie
+    s.cookies.set("LEETCODE_SESSION", LEETCODE_SESSION, domain="leetcode.com", path="/")
 
     # GET homepage to get csrftoken cookie
     try:
@@ -273,3 +266,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
+
+## 3. `requirements.txt` (root directory)
+```
+requests
