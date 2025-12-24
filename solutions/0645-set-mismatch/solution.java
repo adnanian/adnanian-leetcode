@@ -1,26 +1,33 @@
-import java.util.ArrayList;
-
+// Iteration #2
 class Solution {
     public int[] findErrorNums(int[] nums) {
-        // Initialize list of sorted numbers from 1 to n (asc);
-        ArrayList<Integer> numList = new ArrayList<>();
-        for (int i = 0; i < nums.length; i++) {
-            numList.add(i + 1);
-        }
+        // Initialize empty array of size nums.length (asc);
+        int[] numSet = new int[nums.length];
+
         // Initialize duplicate.
         // Then loop through nums.
         int duplicate = 0;
-        for (int num: nums) {
-            if (numList.contains(num)) {
-                // Pop nums from numList.
-                numList.remove(Integer.valueOf(num));
-            } else {
-                // Set the duplicate if num is already removed.
+        int j = 0; // numSetIndex
+        for (int i = 0;i<nums.length;i++) {
+            int num = nums[i];
+            j = num - 1;
+            if (numSet[j] == num) {
                 duplicate = num;
+            } else {
+                numSet[j] = num;
             }
         }
-        // Missing num is the remaining num in numList.
-        int missingNum = !numList.isEmpty() ? numList.get(0) : 0;
-        return new int[] {duplicate, missingNum};
+        
+        // Loop through numSet to find missingNum
+        int missingNum = 0;
+        j = 0;
+        while (missingNum == 0 && j < numSet.length) {
+            if (numSet[j] == 0) {
+                missingNum = j + 1;
+            }
+            j++;
+        }
+
+        return new int[]{duplicate,missingNum};
     }
 }
